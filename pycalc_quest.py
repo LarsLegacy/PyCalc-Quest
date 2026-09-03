@@ -168,7 +168,26 @@ elif st.session_state.mode == "quiz_page":
                 
             uc = st.text_area("Taip kod Python anda di sini:", value="# Tulis kod...\n", height=150, key=f"uc_{lvl}")
             col_btn1, col_btn2 = st.columns(2)
-if st.button("🚀 Semak Jawapan", type="primary", use_container_width=True, disabled=is_locked):if all(x in uc for x in dataset[lvl]["r"]):st.success("🎉 TEPAT SEKALI! Sila klik Seterusnya.")st.session_state.show_wrong_alert = Falseif not st.session_state.correct:st.session_state.score += 100st.session_state.correct = Trueelse:st.session_state.tries_left -= 1st.session_state.show_wrong_alert = Truest.rerun()with col_btn2:if st.session_state.correct or st.session_state.tries_left <= 0:if st.button("➡️ Seterusnya", use_container_width=True):st.session_state.level += 1st.session_state.correct = Falsest.session_state.tries_left = 3st.session_state.show_wrong_alert = Falsest.rerun()
-            
+
             with col_btn1:
                 is_locked = st.session_state.correct or st.session_state.tries_left <= 0
+                if st.button("🚀 Semak Jawapan", type="primary", use_container_width=True, disabled=is_locked):
+                    if all(x in uc for x in dataset[lvl]["r"]):
+                        st.success("🎉 TEPAT SEKALI! Sila klik Seterusnya.")
+                        st.session_state.show_wrong_alert = False
+                        if not st.session_state.correct:
+                            st.session_state.score += 100
+                        st.session_state.correct = True
+                    else:
+                        st.session_state.tries_left -= 1
+                        st.session_state.show_wrong_alert = True
+                    st.rerun()
+
+            with col_btn2:
+                if st.session_state.correct or st.session_state.tries_left <= 0:
+                    if st.button("➡️ Seterusnya", use_container_width=True):
+                        st.session_state.level += 1
+                        st.session_state.correct = False
+                        st.session_state.tries_left = 3
+                        st.session_state.show_wrong_alert = False
+                        st.rerun()
