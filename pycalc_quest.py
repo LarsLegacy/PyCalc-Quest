@@ -215,6 +215,12 @@ def load_user_progress(username):
     # even if the user's saved data is from an older version.
     saved_levels = data.get("completed_levels") or {}
 
+    # Backward-compat: earlier versions called this topic "Control";
+    # it's now "Selection". Carry old progress over so accounts made
+    # before this update don't look like they lost it.
+    if "Control" in saved_levels and not saved_levels.get("Selection"):
+        saved_levels["Selection"] = saved_levels["Control"]
+
     st.session_state.completed_levels = {
         topic: saved_levels.get(topic, [])
         for topic in ALL_TOPICS
@@ -777,8 +783,22 @@ def get_rank(rating):
         return "\u26A1 Advanced Coder"
     elif rating < 1600:
         return "\U0001F525 Python Expert"
-    else:
+    elif rating < 2000:
         return "\U0001F451 Python Master"
+    elif rating < 2500:
+        return "\U0001F468\u200D\U0001F4BB Junior Developer"
+    elif rating < 3200:
+        return "\U0001F6E0\uFE0F Software Engineer"
+    elif rating < 4000:
+        return "\U0001F3AF Senior Engineer"
+    elif rating < 5000:
+        return "\U0001F9ED Tech Lead"
+    elif rating < 6500:
+        return "\U0001F3D7\uFE0F Software Architect"
+    elif rating < 10000:
+        return "\U0001F396\uFE0F Principal Engineer"
+    else:
+        return "\U0001F680 10x Engineer"
 
 
 def get_leaderboard(top_n=10):
