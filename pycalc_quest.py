@@ -3,8 +3,6 @@ import re
 import base64
 import builtins as _builtins
 import hashlib
-import json
-import os
 import secrets
 import threading
 import time
@@ -139,31 +137,60 @@ def render_mascot(text, key=None):
 
 
 # =========================================================
-# ACCOUNTS (local JSON file, salted+hashed passwords)
-# Guests never touch this file, so their progress is never saved.
+# ACCOUNTS (Supabase-backed, salted+hashed passwords)
+# Guests never touch the database, so their progress is never saved.
 # =========================================================
 
-USERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pycalc_users.json")
+@st.cache_resource
+def get_supabase_client():
+    from supabase import create_client
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 
-def load_users():
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return {}
-    return {}
+def get_user(username):
+    """Returns the user's row dict, or None if not found / DB unreachable."""
+    try:
+        supabase = get_supabase_client()
+        res = supabase.table("users").select("*").eq("username", username).execute()
+        return res.data[0] if res.data else None
+    except Exception as e:
+        st.error(f"Couldn't reach the database: {e}")
+        return None
 
 
-def save_users(users):
-    """Writes via a temp file + atomic rename so a crash or an overlapping
-    write from another session can't leave pycalc_users.json half-written
-    or corrupted."""
-    tmp_path = USERS_FILE + ".tmp"
-    with open(tmp_path, "w") as f:
-        json.dump(users, f, indent=2)
-    os.replace(tmp_path, USERS_FILE)
+def get_all_users():
+    """Returns every user row, or [] if the DB is unreachable."""
+    try:
+        supabase = get_supabase_client()
+        res = supabase.table("users").select("*").execute()
+        return res.data or []
+    except Exception as e:
+        st.error(f"Couldn't reach the database: {e}")
+        return []
+
+
+def create_user(username, salt, pwd_hash, seed=None):
+    """Creates a new account row. `seed`, if given, is a dict of progress
+    fields (xp/rating/completed_levels/etc.) carried over from a guest
+    session so signing up doesn't wipe what they already did."""
+    seed = seed or {}
+    supabase = get_supabase_client()
+    supabase.table("users").insert({
+        "username": username,
+        "salt": salt,
+        "password_hash": pwd_hash,
+        "xp": seed.get("xp", 0),
+        "rating": seed.get("rating", DEFAULT_RATING),
+        "completed_levels": seed.get("completed_levels", {t: [] for t in ALL_TOPICS}),
+        "achievements": seed.get("achievements", []),
+        "streak_count": seed.get("streak_count", 0),
+        "longest_streak": seed.get("longest_streak", 0),
+        "last_play_date": seed.get("last_play_date"),
+        "had_perfect_run": seed.get("had_perfect_run", False),
+        "had_speed_run": seed.get("had_speed_run", False),
+    }).execute()
 
 
 def hash_password(password, salt=None):
@@ -179,21 +206,20 @@ def verify_password(password, salt, expected_hash):
 
 
 def load_user_progress(username):
-    users = load_users()
-    data = users.get(username, {})
+    data = get_user(username) or {}
 
     st.session_state.xp = data.get("xp", 0)
     st.session_state.rating = data.get("rating", DEFAULT_RATING)
 
     # Make sure every current topic exists,
     # even if the user's saved data is from an older version.
-    saved_levels = data.get("completed_levels", {})
+    saved_levels = data.get("completed_levels") or {}
 
     st.session_state.completed_levels = {
         topic: saved_levels.get(topic, [])
         for topic in ALL_TOPICS
     }
-    st.session_state.achievements = data.get("achievements", [])
+    st.session_state.achievements = data.get("achievements") or []
     st.session_state.streak_count = data.get("streak_count", 0)
     st.session_state.longest_streak = data.get("longest_streak", 0)
     st.session_state.last_play_date = data.get("last_play_date")
@@ -203,22 +229,24 @@ def load_user_progress(username):
 
 def persist_progress():
     """Writes current xp/rating/completed_levels/achievements/streak back to
-    disk. No-op for guests or anyone not logged in."""
+    Supabase. No-op for guests or anyone not logged in."""
     if st.session_state.get("is_guest") or not st.session_state.get("username"):
         return
-    users = load_users()
-    username = st.session_state.username
-    if username in users:
-        users[username]["xp"] = st.session_state.xp
-        users[username]["rating"] = st.session_state.rating
-        users[username]["completed_levels"] = st.session_state.completed_levels
-        users[username]["achievements"] = st.session_state.achievements
-        users[username]["streak_count"] = st.session_state.streak_count
-        users[username]["longest_streak"] = st.session_state.longest_streak
-        users[username]["last_play_date"] = st.session_state.last_play_date
-        users[username]["had_perfect_run"] = st.session_state.had_perfect_run
-        users[username]["had_speed_run"] = st.session_state.had_speed_run
-        save_users(users)
+    try:
+        supabase = get_supabase_client()
+        supabase.table("users").update({
+            "xp": st.session_state.xp,
+            "rating": st.session_state.rating,
+            "completed_levels": st.session_state.completed_levels,
+            "achievements": st.session_state.achievements,
+            "streak_count": st.session_state.streak_count,
+            "longest_streak": st.session_state.longest_streak,
+            "last_play_date": st.session_state.last_play_date,
+            "had_perfect_run": st.session_state.had_perfect_run,
+            "had_speed_run": st.session_state.had_speed_run,
+        }).eq("username", st.session_state.username).execute()
+    except Exception as e:
+        st.error(f"Couldn't save progress: {e}")
 
 
 # =========================================================
@@ -755,15 +783,15 @@ def get_rank(rating):
 
 def get_leaderboard(top_n=10):
     """Top N registered accounts by rating (ties broken by XP, then name).
-    Guests never appear here since they're never written to USERS_FILE."""
-    users = load_users()
+    Guests never appear here since they're never written to the database."""
+    users = get_all_users()
     entries = [
         {
-            "username": username,
+            "username": data["username"],
             "rating": data.get("rating", 1000),
             "xp": data.get("xp", 0),
         }
-        for username, data in users.items()
+        for data in users
     ]
     entries.sort(key=lambda e: (-e["rating"], -e["xp"], e["username"].lower()))
     return entries[:top_n]
@@ -2262,8 +2290,7 @@ def render_auth_page():
         login_pass = st.text_input("Password", type="password", key="login_password")
         if st.button("Log In", key="login_btn"):
             username = login_user.strip()
-            users = load_users()
-            record = users.get(username)
+            record = get_user(username)
             if record and verify_password(login_pass, record["salt"], record["password_hash"]):
                 st.session_state.username = username
                 st.session_state.is_guest = False
@@ -2280,10 +2307,9 @@ def render_auth_page():
         confirm_pass = st.text_input("Confirm password", type="password", key="signup_confirm")
         if st.button("Sign Up", key="signup_btn"):
             username = new_user.strip()
-            users = load_users()
             if not username or not new_pass:
                 st.error("Please fill in all fields.")
-            elif username in users:
+            elif get_user(username) is not None:
                 st.error("That username is already taken.")
             elif new_pass != confirm_pass:
                 st.error("Passwords do not match.")
@@ -2294,23 +2320,20 @@ def render_auth_page():
                 # Carry over whatever progress was made this session as a
                 # guest, so "sign up to save your progress" is literally
                 # true instead of resetting them back to zero.
-                users[username] = {
-                    "salt": salt,
-                    "password_hash": pwd_hash,
-                    "xp": st.session_state.xp if st.session_state.is_guest else 0,
-                    "rating": st.session_state.rating if st.session_state.is_guest else DEFAULT_RATING,
-                    "completed_levels": (
-                        st.session_state.completed_levels if st.session_state.is_guest
-                        else {t: [] for t in ALL_TOPICS}
-                    ),
-                    "achievements": st.session_state.achievements if st.session_state.is_guest else [],
-                    "streak_count": st.session_state.streak_count if st.session_state.is_guest else 0,
-                    "longest_streak": st.session_state.longest_streak if st.session_state.is_guest else 0,
-                    "last_play_date": st.session_state.last_play_date if st.session_state.is_guest else None,
-                    "had_perfect_run": st.session_state.had_perfect_run if st.session_state.is_guest else False,
-                    "had_speed_run": st.session_state.had_speed_run if st.session_state.is_guest else False,
-                }
-                save_users(users)
+                seed = None
+                if st.session_state.is_guest:
+                    seed = {
+                        "xp": st.session_state.xp,
+                        "rating": st.session_state.rating,
+                        "completed_levels": st.session_state.completed_levels,
+                        "achievements": st.session_state.achievements,
+                        "streak_count": st.session_state.streak_count,
+                        "longest_streak": st.session_state.longest_streak,
+                        "last_play_date": st.session_state.last_play_date,
+                        "had_perfect_run": st.session_state.had_perfect_run,
+                        "had_speed_run": st.session_state.had_speed_run,
+                    }
+                create_user(username, salt, pwd_hash, seed=seed)
                 st.session_state.username = username
                 st.session_state.is_guest = False
                 load_user_progress(username)
@@ -2545,12 +2568,12 @@ elif st.session_state.page == "leaderboard":
 
         # if the logged-in user isn't in the top 10, show them where they stand
         if you and you not in [e["username"] for e in board]:
-            users = load_users()
-            if you in users:
-                all_entries = get_leaderboard(top_n=len(users))
+            your_data = get_user(you)
+            if your_data:
+                all_users = get_all_users()
+                all_entries = get_leaderboard(top_n=len(all_users))
                 usernames_sorted = [e["username"] for e in all_entries]
                 your_place = usernames_sorted.index(you) + 1
-                your_data = users[you]
                 st.divider()
                 st.caption(f"Your rank: #{your_place}")
                 st.markdown(
