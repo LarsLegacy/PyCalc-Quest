@@ -640,11 +640,14 @@ def inject_theme():
 
         .achievement-badge {
             font-family: 'Courier New', monospace;
-            display: inline-block;
+            display: block;
+            width: 100%;
+            max-width: 560px;
+            box-sizing: border-box;
             border: 1px solid rgba(0, 255, 242, 0.4);
             border-radius: 8px;
             padding: 8px 12px;
-            margin: 4px 6px 4px 0;
+            margin: 6px 0;
             background: rgba(0, 255, 242, 0.06);
         }
         .achievement-badge.locked {
@@ -2001,6 +2004,16 @@ ACHIEVEMENTS = {
     "core_breach": {"emoji": "\U0001F451", "title": "Core Breach", "desc": "Defeat all 3 stages of the secret 4th sector."},
     "streak_3": {"emoji": "\U0001F525", "title": "3-Day Streak", "desc": "Play PyCalc-Quest 3 days in a row."},
     "streak_7": {"emoji": "\U0001F31F", "title": "7-Day Streak", "desc": "Play PyCalc-Quest 7 days in a row."},
+    "warm_up": {"emoji": "\U0001F3C3", "title": "Warming Up", "desc": "Stabilize 5 nodes in total."},
+    "node_crusher": {"emoji": "\U0001F4A5", "title": "Node Crusher", "desc": "Stabilize 20 nodes in total."},
+    "coder_rank": {"emoji": "\U0001F4BB", "title": "Certified Coder", "desc": "Reach 1000 rating."},
+    "master_rank": {"emoji": "\U0001F40D", "title": "Python Master", "desc": "Reach 1600 rating."},
+    "engineer_rank": {"emoji": "\U0001F6E0\uFE0F", "title": "Software Engineer", "desc": "Reach 2500 rating."},
+    "ten_x": {"emoji": "\U0001F680", "title": "10x Engineer", "desc": "Reach 10000 rating."},
+    "xp_1000": {"emoji": "\u2B50", "title": "XP Collector", "desc": "Earn 1,000 XP."},
+    "xp_10000": {"emoji": "\U0001F48E", "title": "XP Hoarder", "desc": "Earn 10,000 XP."},
+    "streak_14": {"emoji": "\U0001F4AA", "title": "Two-Week Warrior", "desc": "Play PyCalc-Quest 14 days in a row."},
+    "streak_30": {"emoji": "\U0001F9D9", "title": "Monthly Legend", "desc": "Play PyCalc-Quest 30 days in a row."},
 }
 
 
@@ -2031,6 +2044,33 @@ def compute_unlocked_achievements():
         unlocked.add("streak_3")
     if st.session_state.get("streak_count", 0) >= 7:
         unlocked.add("streak_7")
+    
+    total_nodes = sum(len(v) for v in cl.values())
+    if total_nodes >= 5:
+        unlocked.add("warm_up")
+    if total_nodes >= 20:
+        unlocked.add("node_crusher")
+
+    rating = st.session_state.get("rating", 0)
+    if rating >= 1000:
+        unlocked.add("coder_rank")
+    if rating >= 1600:
+        unlocked.add("master_rank")
+    if rating >= 2500:
+        unlocked.add("engineer_rank")
+    if rating >= 10000:
+        unlocked.add("ten_x")
+
+    xp = st.session_state.get("xp", 0)
+    if xp >= 1000:
+        unlocked.add("xp_1000")
+    if xp >= 10000:
+        unlocked.add("xp_10000")
+
+    if st.session_state.get("streak_count", 0) >= 14:
+        unlocked.add("streak_14")
+    if st.session_state.get("streak_count", 0) >= 30:
+        unlocked.add("streak_30")
     return unlocked
 
 
